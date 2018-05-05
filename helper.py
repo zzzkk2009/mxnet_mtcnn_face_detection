@@ -8,6 +8,7 @@ import numpy as np
 def nms(boxes, overlap_threshold, mode='Union'):
     """
         non max suppression
+        非最大抑制，合并高度重合的候选窗口
 
     Parameters:
     ----------
@@ -66,6 +67,7 @@ def nms(boxes, overlap_threshold, mode='Union'):
 
     return pick
 
+
 def adjust_input(in_data):
     """
         adjust the input from (h, w, c) to ( 1, c, h, w) for network input
@@ -84,49 +86,53 @@ def adjust_input(in_data):
     else:
         out_data = in_data
 
-    out_data = out_data.transpose((2,0,1))
+    out_data = out_data.transpose((2, 0, 1))
     out_data = np.expand_dims(out_data, 0)
-    out_data = (out_data - 127.5)*0.0078125
+    out_data = (out_data - 127.5) * 0.0078125
     return out_data
 
+
 def generate_bbox(map, reg, scale, threshold):
-     """
-         generate bbox from feature map
-     Parameters:
-     ----------
-         map: numpy array , n x m x 1
-             detect score for each position
-         reg: numpy array , n x m x 4
-             bbox
-         scale: float number
-             scale of this detection
-         threshold: float number
-             detect threshold
-     Returns:
-     -------
-         bbox array
-     """
-     stride = 2
-     cellsize = 12
+    """
+        generate bbox from feature map
+    Parameters:
+    ----------
+        map: numpy array , n x m x 1  ****但实际接收(xx, xx)
+            detect score for each position
+        reg: numpy array , n x m x 4  ****但实际接收(1, 4, xx, xx)
+            bbox
+        scale: float number
+            scale of this detection
+        threshold: float number
+            detect threshold
+    Returns:
+    -------
+        bbox array
+    """
+    stride = 2
+    cellsize = 12
 
-     t_index = np.where(map>threshold)
+    t_index = np.where(map > threshold)
+    # print('t_index')
+    # print('t_index[0].shape=', t_index[0].shape)
 
-     # find nothing
-     if t_index[0].size == 0:
-         return np.array([])
+    # find nothing
+    if t_index[0].size == 0:
+        return np.array([])
 
-     dx1, dy1, dx2, dy2 = [reg[0, i, t_index[0], t_index[1]] for i in range(4)]
+    dx1, dy1, dx2, dy2 = [reg[0, i, t_index[0], t_index[1]] for i in range(4)]
 
-     reg = np.array([dx1, dy1, dx2, dy2])
-     score = map[t_index[0], t_index[1]]
-     boundingbox = np.vstack([np.round((stride*t_index[1]+1)/scale),
-                              np.round((stride*t_index[0]+1)/scale),
-                              np.round((stride*t_index[1]+1+cellsize)/scale),
-                              np.round((stride*t_index[0]+1+cellsize)/scale),
-                              score,
-                              reg])
-
-     return boundingbox.T
+    reg = np.array([dx1, dy1, dx2, dy2])
+    score = map[t_index[0], t_index[1]]
+    boundingbox = np.vstack([np.round((stride * t_index[1] + 1) / scale),
+                             np.round((stride * t_index[0] + 1) / scale),
+                             np.round((stride * t_index[1] + 1 + cellsize) / scale),
+                             np.round((stride * t_index[0] + 1 + cellsize) / scale),
+                             score,
+                             reg])
+    # print('boundingbox=', boundingbox)
+    # print('boundingbox.shape=', boundingbox.shape)  # (9, xx)
+    return boundingbox.T
 
 
 def detect_first_stage(img, net, scale, threshold):
@@ -148,21 +154,40 @@ def detect_first_stage(img, net, scale, threshold):
     height, width, _ = img.shape
     hs = int(math.ceil(height * scale))
     ws = int(math.ceil(width * scale))
-    
-    im_data = cv2.resize(img, (ws,hs))
-    
+
+    im_data = cv2.resize(img, (ws, hs))
+
     # adjust for the network input
-    input_buf = adjust_input(im_data)
+    input_buf = adjust_input(im_data)  # adjust the input from (h, w, c) to ( 1, c, h, w) for network input
     output = net.predict(input_buf)
-    boxes = generate_bbox(output[1][0,1,:,:], output[0], scale, threshold)
+    """
+    候选人脸窗口
+    output: 
+    face classification: 1x1x2
+    bounding box regression: 1x1x4
+    facial landmark localization: 1x1x10
+    """
+    # print('output[0].shape=', output[0].shape)  # (1, 4, 99, 179) ...  (1, 4, 9, 19) ...
+    # print('output[1].shape=', output[1].shape)  # (1, 2, 99, 179) ...  (1, 2, 9, 19) ...
+    # print('output=', output)
+    # print('output[1].shape=', output[1].shape)  # (1, 2, 2, 7)
+    # print('output[1][0, 1, :, :]=', output[1][0, 1, :, :])
+    # print('output[0]=', output[0])
+    # print('output[1][0, 1, :, :]=', output[1][0, 1, :, :])
+    # print('output[1][0, 1, :, :].shape=', output[1][0, 1, :, :].shape)
+    # print('output[0].shape=', output[0].shape)
+    # output[1][0, 1, :, :] 所有候选窗口位置
+    # output[0] 边界框向量
+    boxes = generate_bbox(output[1][0, 1, :, :], output[0], scale, threshold)
 
     if boxes.size == 0:
         return None
 
     # nms
-    pick = nms(boxes[:,0:5], 0.5, mode='Union')
+    pick = nms(boxes[:, 0:5], 0.5, mode='Union')
     boxes = boxes[pick]
     return boxes
 
-def detect_first_stage_warpper( args ):
+
+def detect_first_stage_warpper(args):
     return detect_first_stage(*args)
